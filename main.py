@@ -641,9 +641,7 @@ class MainApp(QWidget):
                 args = build_command('netstat')
                 self._run_tool_thread("ss", args, aid, target, " ".join(args), None)
 
-        # raw / advanced: UNRESTRICTED — expert mode.
-        # Since this can run literally anything the user typed, ask for an
-        # explicit confirmation before firing it off.
+
         raw_text = self.raw_args.text().strip()
         if raw_text:
             reply = QMessageBox.question(
