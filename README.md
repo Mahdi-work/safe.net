@@ -29,7 +29,7 @@ This project was developed as a personal project to improve my Python programmin
 ---
 
 ## Screenshots
-
+![test_safe_net.png](../../test_safe_net.png)
 Screenshots will be added soon.
 
 ---
