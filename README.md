@@ -56,7 +56,7 @@ Some tools are not installed by default on Windows and must be installed manuall
 Clone the repository:
 
 ```bash
-git clone https://github.com/yourusername/nsec-toolkit.git
+git clone https://github.com/Mahdi-work/safe.net.git
 ```
 
 Go to the project directory:
@@ -191,3 +191,4 @@ This project is licensed under the MIT License.
 Computer Engineering Student (Information Technology)
 
 GitHub: https://github.com/Mahdi-work
+```

@@ -305,11 +305,11 @@ class MainApp(QWidget):
         main = QVBoxLayout()
         # --- user info (required for audit) ---
         user_row = QHBoxLayout()
-        user_row.addWidget(QLabel(":نام مهندس"))
+        user_row.addWidget(QLabel("نام مهندس:"))
         self.user_name = QLineEdit()
         self.user_name.setPlaceholderText("مثلاً: mahdi")
         user_row.addWidget(self.user_name)
-        user_row.addWidget(QLabel(":ایمیل"))
+        user_row.addWidget(QLabel("ایمیل: "))
         self.user_email = QLineEdit()
         self.user_email.setPlaceholderText("مثلاً: you@gmail.com")
         user_row.addWidget(self.user_email)
@@ -472,7 +472,6 @@ class MainApp(QWidget):
         w.setLayout(layout)
         return w
 
-    # ------------- nmap arg helpers (shared by preview + execution) -------------
     def _nmap_enabled(self):
         return any([
             self.cb_top100.isChecked(), self.cb_syn.isChecked(), self.cb_connect.isChecked(),
