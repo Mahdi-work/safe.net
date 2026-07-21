@@ -1,4 +1,5 @@
 import os
+import platform
 import shlex
 import shutil
 import sqlite3
@@ -146,48 +147,16 @@ def looks_like_flag_injection(target):
     return target.strip().startswith('-')
 
 
+# --------- OS detection ---------
 
-IS_WINDOWS = sys.platform.startswith('win')
+SYSTEM = platform.system()
+IS_WINDOWS = SYSTEM == "Windows"
 
 
 def resolve_tool_name(logical_name):
     if IS_WINDOWS and logical_name == 'traceroute':
         return 'tracert'
     return logical_name
-
-
-def build_ping_args(target, count):
-    ping_cmd = which_or_none('ping') or 'ping'
-    count_flag = '-n' if IS_WINDOWS else '-c'
-    return [ping_cmd, count_flag, str(count), target]
-
-
-def build_traceroute_args(target):
-    name = resolve_tool_name('traceroute')
-    cmd = which_or_none(name) or name
-    return [cmd, target]
-
-
-def build_arp_args():
-    arp_cmd = which_or_none('arp') or 'arp'
-    flag = '-a' if IS_WINDOWS else '-n'
-    return [arp_cmd, flag]
-
-
-def build_ip_info_args():
-    if IS_WINDOWS:
-        cmd = which_or_none('ipconfig') or 'ipconfig'
-        return [cmd, '/all']
-    cmd = which_or_none('ip') or 'ip'
-    return [cmd, 'a']
-
-
-def build_socket_stats_args():
-    if IS_WINDOWS:
-        cmd = which_or_none('netstat') or 'netstat'
-        return [cmd, '-ano']
-    cmd = which_or_none('ss') or 'ss'
-    return [cmd, '-tunap']
 
 
 def missing_tool_hint(logical_name, resolved_binary):
@@ -197,16 +166,125 @@ def missing_tool_hint(logical_name, resolved_binary):
     if IS_WINDOWS:
         hints = {
             'whois': "'winget install Microsoft.Sysinternals' را اجرا کن. دستور whois به‌صورت پیش‌فرض روی ویندوز نصب نیست.",
-            'dig': "'winget install ISC.BIND' را اجرا کن. دستور dig به‌صورت پیش‌فرض روی ویندوز نصب نیست.",
+            'dig': "دستور 'nslookup' (جایگزین dig روی ویندوز) پیدا نشد؛ این ابزار معمولاً به‌صورت پیش‌فرض روی ویندوز نصب است. برای dig واقعی: 'winget install ISC.BIND'.",
             'nmap': "'winget install Insecure.Nmap' را اجرا کن. دستور nmap به‌صورت پیش‌فرض روی ویندوز نصب نیست.",
+            'traceroute': "دستور 'tracert' (جایگزین traceroute روی ویندوز) پیدا نشد. این ابزار معمولاً به‌صورت پیش‌فرض روی ویندوز موجود است.",
         }
     else:
         hints = {
             'whois': "نصب نیست. با 'sudo apt install whois' (یا معادلش در توزیعت) نصبش کن.",
             'dig': "نصب نیست. با 'sudo apt install dnsutils' (یا bind-utils) نصبش کن.",
             'nmap': "نصب نیست. با 'sudo apt install nmap' نصبش کن.",
+            'traceroute': "نصب نیست. با 'sudo apt install traceroute' (یا معادلش در توزیعت) نصبش کن.",
         }
     return hints.get(logical_name, f"دستور '{resolved_binary}' روی PATH پیدا نشد.")
+
+
+def build_command(tool_name, target=None, options=None):
+    options = options or {}
+
+    if tool_name == 'nmap':
+
+        binary = which_or_none('nmap') or 'nmap'
+        extra = list(options.get('args', []))
+        cmd = [binary] + extra
+        if target and target not in extra:
+            cmd.append(target)
+        return cmd
+
+    if tool_name == 'ping':
+        binary = which_or_none('ping') or 'ping'
+        count = str(options.get('count', 4))
+        count_flag = '-n' if IS_WINDOWS else '-c'
+        return [binary, count_flag, count, target]
+
+    if tool_name == 'traceroute':
+        logical = resolve_tool_name('traceroute')
+        binary = which_or_none(logical) or logical
+        return [binary, target]
+
+    if tool_name == 'dig':
+        if IS_WINDOWS:
+            binary = which_or_none('nslookup') or 'nslookup'
+            rtype = options.get('record_type')
+            args = [binary]
+            if rtype:
+                args.append('-type=' + rtype)
+            args.append(target)
+            return args
+        binary = which_or_none('dig') or 'dig'
+        args = [binary, target]
+        rtype = options.get('record_type')
+        if rtype:
+            args.append(rtype)
+        return args
+
+    if tool_name == 'whois':
+        binary = which_or_none('whois') or 'whois'
+        return [binary, target]
+
+    if tool_name == 'arp':
+        binary = which_or_none('arp') or 'arp'
+
+        flag = '-a' if IS_WINDOWS else '-n'
+        return [binary, flag]
+
+    if tool_name == 'ip':
+        if IS_WINDOWS:
+            binary = which_or_none('ipconfig') or 'ipconfig'
+            return [binary, '/all']
+        binary = which_or_none('ip') or 'ip'
+        return [binary, 'a']
+
+    if tool_name == 'route':
+
+        if IS_WINDOWS:
+            binary = which_or_none('route') or 'route'
+            return [binary, 'print']
+        binary = which_or_none('ip') or 'ip'
+        return [binary, 'route']
+
+    if tool_name == 'hostname':
+        binary = which_or_none('hostname') or 'hostname'
+        return [binary]
+
+    if tool_name == 'netstat':
+        if IS_WINDOWS:
+            binary = which_or_none('netstat') or 'netstat'
+            return [binary, '-ano']
+        binary = which_or_none('ss') or 'ss'
+        return [binary, '-tunap']
+
+    raise ValueError(f"Unknown tool_name for build_command: {tool_name!r}")
+
+
+
+def build_ping_args(target, count):
+    return build_command('ping', target, {'count': count})
+
+
+def build_traceroute_args(target):
+    return build_command('traceroute', target)
+
+
+def build_arp_args():
+    return build_command('arp')
+
+
+def build_ip_info_args():
+    return build_command('ip')
+
+
+def build_socket_stats_args():
+    return build_command('netstat')
+
+
+def build_route_args():
+    return build_command('route')
+
+
+def build_hostname_args():
+    return build_command('hostname')
 
 
 # -------------------- GUI --------------------
@@ -394,6 +472,31 @@ class MainApp(QWidget):
         w.setLayout(layout)
         return w
 
+    # ------------- nmap arg helpers (shared by preview + execution) -------------
+    def _nmap_enabled(self):
+        return any([
+            self.cb_top100.isChecked(), self.cb_syn.isChecked(), self.cb_connect.isChecked(),
+            self.cb_udp.isChecked(), self.cb_os.isChecked(), self.cb_service.isChecked(),
+            self.cb_aggr.isChecked(), self.cb_ping.isChecked(), self.port_input.text().strip(),
+            self.scripts_input.text().strip()
+        ])
+
+    def _collect_nmap_option_args(self):
+        args = []
+        if self.cb_top100.isChecked(): args += ['--top-ports', '100']
+        if self.cb_syn.isChecked(): args += ['-sS']
+        if self.cb_connect.isChecked(): args += ['-sT']
+        if self.cb_udp.isChecked(): args += ['-sU']
+        if self.cb_os.isChecked(): args += ['-O']
+        if self.cb_service.isChecked(): args += ['-sV']
+        if self.cb_aggr.isChecked(): args += ['-A']
+        if self.cb_ping.isChecked(): args += ['-sn']
+        if self.port_input.text().strip(): args += ['-p', self.port_input.text().strip()]
+        if self.scripts_input.text().strip(): args += ['--script', self.scripts_input.text().strip()]
+        args += ['-T' + self.timing_combo.currentText()]
+        args += ['-oX', '-']
+        return args
+
     # ------------- actions -------------
     def load_targets_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "Load targets", ".", "Text files (*.txt);;All files (*)")
@@ -410,38 +513,23 @@ class MainApp(QWidget):
     def aggregate_preview(self):
         t = self.target_input.text().strip() or "<target>"
         parts = []
-        if any([self.cb_top100.isChecked(), self.cb_syn.isChecked(), self.cb_connect.isChecked(),
-                self.cb_udp.isChecked(), self.cb_os.isChecked(), self.cb_service.isChecked(),
-                self.cb_aggr.isChecked(), self.cb_ping.isChecked(), self.port_input.text().strip(),
-                self.scripts_input.text().strip()]):
-            args = ['nmap']
-            if self.cb_top100.isChecked(): args += ['--top-ports', '100']
-            if self.cb_syn.isChecked(): args += ['-sS']
-            if self.cb_connect.isChecked(): args += ['-sT']
-            if self.cb_udp.isChecked(): args += ['-sU']
-            if self.cb_os.isChecked(): args += ['-O']
-            if self.cb_service.isChecked(): args += ['-sV']
-            if self.cb_aggr.isChecked(): args += ['-A']
-            if self.cb_ping.isChecked(): args += ['-sn']
-            if self.port_input.text().strip(): args += ['-p', self.port_input.text().strip()]
-            if self.scripts_input.text().strip(): args += ['--script', self.scripts_input.text().strip()]
-            args += ['-T' + self.timing_combo.currentText()]
-            args += ['-oX', '-']
-            args.append(t)
-            parts.append(" ".join(shlex.quote(a) for a in args))
+        if self._nmap_enabled():
+            nmap_opts = self._collect_nmap_option_args()
+            full_args = build_command('nmap', t, {'args': nmap_opts})
+            parts.append(" ".join(shlex.quote(a) for a in full_args))
         if self.cb_ping_tool.isChecked():
-            count_flag = '-n' if IS_WINDOWS else '-c'
-            parts.append(f"ping {count_flag} {self.ping_count.text().strip()} {t}")
+            cnt_text = self.ping_count.text().strip() or "3"
+            parts.append(" ".join(build_command('ping', t, {'count': cnt_text})))
         if self.cb_traceroute.isChecked():
-            parts.append(f"{resolve_tool_name('traceroute')} {t}")
+            parts.append(" ".join(build_command('traceroute', t)))
         if self.cb_whois.isChecked():
-            parts.append(f"whois {t}")
+            parts.append(" ".join(build_command('whois', t)))
         if self.cb_dig.isChecked():
-            parts.append(f"dig {t} {self.dig_type.currentText()}")
+            parts.append(" ".join(build_command('dig', t, {'record_type': self.dig_type.currentText()})))
         local_parts = []
-        if self.cb_arp.isChecked(): local_parts.append("arp -a" if IS_WINDOWS else "arp -n")
-        if self.cb_ip.isChecked(): local_parts.append("ipconfig /all" if IS_WINDOWS else "ip a")
-        if self.cb_ss.isChecked(): local_parts.append("netstat -ano" if IS_WINDOWS else "ss -tunap")
+        if self.cb_arp.isChecked(): local_parts.append(" ".join(build_command('arp')))
+        if self.cb_ip.isChecked(): local_parts.append(" ".join(build_command('ip')))
+        if self.cb_ss.isChecked(): local_parts.append(" ".join(build_command('netstat')))
         if local_parts:
             parts.append(" ; ".join(local_parts))
         # raw
@@ -469,81 +557,89 @@ class MainApp(QWidget):
                 "فلگ خط‌فرمان تفسیر شود، نه به‌عنوان هدف. لطفاً مقدار را اصلاح کنید.")
             return
 
-
         container_runtime = find_runtime() if self.container_chk.isChecked() else None
         full_command_summary = self.preview.text() or "manual"
         aid = record_audit(uname, uemail, "RUN_BATCH", full_command_summary, target, "EXPERT", bool(container_runtime))
         self.current_audit_id = aid
 
-        # run selected tools (each in own thread)
-        # Nmap if configured
-        if any([self.cb_top100.isChecked(), self.cb_syn.isChecked(), self.cb_connect.isChecked(),
-                self.cb_udp.isChecked(), self.cb_os.isChecked(), self.cb_service.isChecked(),
-                self.cb_aggr.isChecked(), self.cb_ping.isChecked(), self.port_input.text().strip(),
-                self.scripts_input.text().strip()]):
-            args = ['nmap']
-            if self.cb_top100.isChecked(): args += ['--top-ports', '100']
-            if self.cb_syn.isChecked(): args += ['-sS']
-            if self.cb_connect.isChecked(): args += ['-sT']
-            if self.cb_udp.isChecked(): args += ['-sU']
-            if self.cb_os.isChecked(): args += ['-O']
-            if self.cb_service.isChecked(): args += ['-sV']
-            if self.cb_aggr.isChecked(): args += ['-A']
-            if self.cb_ping.isChecked(): args += ['-sn']
-            if self.port_input.text().strip(): args += ['-p', self.port_input.text().strip()]
-            if self.scripts_input.text().strip(): args += ['--script', self.scripts_input.text().strip()]
-            args += ['-T' + self.timing_combo.currentText()]
-            args += ['-oX', '-']
-            args.append(target)
-            # nmap is the only tool with a matching container image, so it's
-            # the only one allowed to use container_runtime
-            self._run_tool_thread("nmap", args, aid, target, " ".join(args), container_runtime)
+
+        if self._nmap_enabled():
+
+            hint = None if container_runtime else missing_tool_hint('nmap', 'nmap')
+            if hint:
+                self._report_missing_tool("nmap", aid, target, hint)
+            else:
+                nmap_opts = self._collect_nmap_option_args()
+                args = build_command('nmap', target, {'args': nmap_opts})
+                # nmap is the only tool with a matching container image, so it's
+                # the only one allowed to use container_runtime
+                self._run_tool_thread("nmap", args, aid, target, " ".join(args), container_runtime)
 
         # Ping
         if self.cb_ping_tool.isChecked():
-            try:
-                cnt = int(self.ping_count.text().strip())
-            except ValueError:
-                cnt = 3
-            args = build_ping_args(target, cnt)
-            self._run_tool_thread("ping", args, aid, target, " ".join(args), None)
+            hint = missing_tool_hint('ping', 'ping')
+            if hint:
+                self._report_missing_tool("ping", aid, target, hint)
+            else:
+                try:
+                    cnt = int(self.ping_count.text().strip())
+                except ValueError:
+                    cnt = 3
+                args = build_command('ping', target, {'count': cnt})
+                self._run_tool_thread("ping", args, aid, target, " ".join(args), None)
 
-        # Traceroute (tracert on Windows)
         if self.cb_traceroute.isChecked():
-            args = build_traceroute_args(target)
-            self._run_tool_thread("traceroute", args, aid, target, " ".join(args), None)
+            resolved = resolve_tool_name('traceroute')
+            hint = missing_tool_hint('traceroute', resolved)
+            if hint:
+                self._report_missing_tool("traceroute", aid, target, hint)
+            else:
+                args = build_command('traceroute', target)
+                self._run_tool_thread("traceroute", args, aid, target, " ".join(args), None)
 
-        # Whois — not built into either OS by default; report a hint if missing
         if self.cb_whois.isChecked():
             hint = missing_tool_hint('whois', 'whois')
             if hint:
                 self._report_missing_tool("whois", aid, target, hint)
             else:
-                whois_cmd = which_or_none('whois') or 'whois'
-                args = [whois_cmd, target]
+                args = build_command('whois', target)
                 self._run_tool_thread("whois", args, aid, target, " ".join(args), None)
 
-        # dig — not built into either OS by default; report a hint if missing
         if self.cb_dig.isChecked():
-            hint = missing_tool_hint('dig', 'dig')
+            dig_resolved = 'nslookup' if IS_WINDOWS else 'dig'
+            hint = missing_tool_hint('dig', dig_resolved)
             if hint:
                 self._report_missing_tool("dig", aid, target, hint)
             else:
-                d = which_or_none('dig') or 'dig'
                 q = self.dig_type.currentText()
-                args = [d, target, q]
+                args = build_command('dig', target, {'record_type': q})
                 self._run_tool_thread("dig", args, aid, target, " ".join(args), None)
 
         # local tools
         if self.cb_arp.isChecked():
-            args = build_arp_args()
-            self._run_tool_thread("arp", args, aid, target, " ".join(args), None)
+            arp_resolved = 'arp'
+            hint = missing_tool_hint('arp', arp_resolved)
+            if hint:
+                self._report_missing_tool("arp", aid, target, hint)
+            else:
+                args = build_command('arp')
+                self._run_tool_thread("arp", args, aid, target, " ".join(args), None)
         if self.cb_ip.isChecked():
-            args = build_ip_info_args()
-            self._run_tool_thread("ip", args, aid, target, " ".join(args), None)
+            ip_resolved = 'ipconfig' if IS_WINDOWS else 'ip'
+            hint = missing_tool_hint('ip', ip_resolved)
+            if hint:
+                self._report_missing_tool("ip", aid, target, hint)
+            else:
+                args = build_command('ip')
+                self._run_tool_thread("ip", args, aid, target, " ".join(args), None)
         if self.cb_ss.isChecked():
-            args = build_socket_stats_args()
-            self._run_tool_thread("ss", args, aid, target, " ".join(args), None)
+            ss_resolved = 'netstat' if IS_WINDOWS else 'ss'
+            hint = missing_tool_hint('ss', ss_resolved)
+            if hint:
+                self._report_missing_tool("ss", aid, target, hint)
+            else:
+                args = build_command('netstat')
+                self._run_tool_thread("ss", args, aid, target, " ".join(args), None)
 
         # raw / advanced: UNRESTRICTED — expert mode.
         # Since this can run literally anything the user typed, ask for an
@@ -561,14 +657,20 @@ class MainApp(QWidget):
                 if rt == 'custom':
                     args = toks
                     raw_container = None
+                    self._run_tool_thread(f"raw:{rt}", args, aid, target, " ".join(args), raw_container)
                 else:
                     real_name = resolve_tool_name(rt)
                     cmd_path = which_or_none(real_name) or real_name
-                    args = [cmd_path] + toks
-                    if rt == 'nmap' and target not in toks:
-                        args = args + [target]
                     raw_container = container_runtime if rt == 'nmap' else None
-                self._run_tool_thread(f"raw:{rt}", args, aid, target, " ".join(args), raw_container)
+
+                    hint = None if raw_container else missing_tool_hint(rt, real_name)
+                    if hint:
+                        self._report_missing_tool(f"raw:{rt}", aid, target, hint)
+                    else:
+                        args = [cmd_path] + toks
+                        if rt == 'nmap' and target not in toks:
+                            args = args + [target]
+                        self._run_tool_thread(f"raw:{rt}", args, aid, target, " ".join(args), raw_container)
 
         self.aggregate_preview()
         self.refresh_history()
@@ -610,8 +712,6 @@ class MainApp(QWidget):
         self.history_list.insertItem(0, item)
 
     def _report_missing_tool(self, tool_name, audit_id, target, hint):
-        """Log + display a friendly message instead of spawning a thread that
-        would just fail with a cryptic 'file not found' style OS error."""
         msg = f"ابزار '{tool_name}' روی این سیستم پیدا نشد.\n{hint}"
         record_scan(audit_id, tool_name, target, "", 127, msg)
         self.on_finished(tool_name, 127, msg)
